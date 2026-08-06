@@ -7,10 +7,8 @@ on:
   workflow_call:
 
 env:
-  # Docker Hub 镜像名称
-  DOCKER_IMAGE: superng6/singbox
-  # GitHub Container Registry (ghcr.io) 镜像名称
-  GHCR_IMAGE: ghcr.io/superng6/singbox
+  # GitHub Container Registry 镜像名称，自动使用当前 fork 的所有者
+  GHCR_IMAGE: ghcr.io/${{ github.repository_owner }}/singbox
 
 jobs:
   # Job 1: 准备阶段
@@ -72,12 +70,6 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: 登录到 Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
       - name: 登录到 GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -85,7 +77,7 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 构建并推送到双仓库 (按摘要)
+      - name: 构建并推送到GHCR (按摘要)
         id: build
         uses: docker/build-push-action@v6
         with:
@@ -96,7 +88,6 @@ jobs:
           build-args: |
             VERSION=${{ needs.prepare.outputs.stable_version }}
           tags: |-
-            ${{ env.DOCKER_IMAGE }}
             ${{ env.GHCR_IMAGE }}
           outputs: type=image,push-by-digest=true,name-canonical=true,push=true
 
@@ -146,12 +137,6 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: 登录到 Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
       - name: 登录到 GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -159,7 +144,7 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 构建并推送到双仓库 (按摘要)
+      - name: 构建并推送到GHCR (按摘要)
         id: build
         uses: docker/build-push-action@v6
         with:
@@ -170,7 +155,6 @@ jobs:
           build-args: |
             VERSION=${{ needs.prepare.outputs.pre_version }}
           tags: |-
-            ${{ env.DOCKER_IMAGE }}
             ${{ env.GHCR_IMAGE }}
           outputs: type=image,push-by-digest=true,name-canonical=true,push=true
 
@@ -197,12 +181,6 @@ jobs:
       contents: read
       packages: write
     steps:
-      - name: 登录到 Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
       - name: 登录到 GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -217,24 +195,19 @@ jobs:
           path: /tmp/digests
           merge-multiple: true
 
-      - name: 创建并推送稳定版 manifest list 到双仓库
+      - name: 创建并推送稳定版 manifest list 到GHCR
         working-directory: /tmp/digests
         run: |
           if [ -z "$(ls -A .)" ]; then exit 1; fi
-          echo "为双仓库创建 manifest: latest, ${{ needs.prepare.outputs.stable_version }}"
+          echo "为GHCR创建 manifest: latest, ${{ needs.prepare.outputs.stable_version }}"
           docker buildx imagetools create \
-            --tag ${{ env.DOCKER_IMAGE }}:latest \
-            --tag ${{ env.DOCKER_IMAGE }}:${{ needs.prepare.outputs.stable_version }} \
             --tag ${{ env.GHCR_IMAGE }}:latest \
             --tag ${{ env.GHCR_IMAGE }}:${{ needs.prepare.outputs.stable_version }} \
-            $(printf '${{ env.DOCKER_IMAGE }}@sha256:%s ' *)
+            $(printf '${{ env.GHCR_IMAGE }}@sha256:%s ' *)
 
-      - name: 检查双仓库的最终镜像
+      - name: 检查GHCR的最终镜像
         if: always()
         run: |
-          echo "--- 检查 Docker Hub 镜像 ---"
-          docker buildx imagetools inspect ${{ env.DOCKER_IMAGE }}:latest
-          echo "--- 检查 GHCR 镜像 ---"
           docker buildx imagetools inspect ${{ env.GHCR_IMAGE }}:latest
 
   # Job 3-2: 合并预发布版镜像
@@ -246,12 +219,6 @@ jobs:
       contents: read
       packages: write
     steps:
-      - name: 登录到 Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
       - name: 登录到 GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -266,23 +233,17 @@ jobs:
           path: /tmp/digests
           merge-multiple: true
 
-      - name: 创建并推送预发布版 manifest list 到双仓库
+      - name: 创建并推送预发布版 manifest list 到GHCR
         working-directory: /tmp/digests
         run: |
           if [ -z "$(ls -A .)" ]; then exit 1; fi
-          echo "为双仓库创建 manifest: dev, ${{ needs.prepare.outputs.pre_version }}"
+          echo "为GHCR创建 manifest: dev, ${{ needs.prepare.outputs.pre_version }}"
           docker buildx imagetools create \
-            --tag ${{ env.DOCKER_IMAGE }}:dev \
-            --tag ${{ env.DOCKER_IMAGE }}:${{ needs.prepare.outputs.pre_version }} \
             --tag ${{ env.GHCR_IMAGE }}:dev \
             --tag ${{ env.GHCR_IMAGE }}:${{ needs.prepare.outputs.pre_version }} \
-            $(printf '${{ env.DOCKER_IMAGE }}@sha256:%s ' *)
+            $(printf '${{ env.GHCR_IMAGE }}@sha256:%s ' *)
 
-      - name: 检查双仓库的最终镜像
+      - name: 检查GHCR的最终镜像
         if: always()
         run: |
-          echo "--- 检查 Docker Hub 镜像 ---"
-          docker buildx imagetools inspect ${{ env.DOCKER_IMAGE }}:dev
-          echo "--- 检查 GHCR 镜像 ---"
           docker buildx imagetools inspect ${{ env.GHCR_IMAGE }}:dev
-
