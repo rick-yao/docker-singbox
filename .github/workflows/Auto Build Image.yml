@@ -3,9 +3,8 @@ name: Auto Build Docker Image
 on:
   # 允许手动触发
   workflow_dispatch:
-  # 定时触发（每天 UTC 21:30）
-  schedule:
-    - cron: '30 21 * * *'
+  # 允许由版本检查 workflow 调用
+  workflow_call:
 
 env:
   # Docker Hub 镜像名称
@@ -32,14 +31,14 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           # 建议获取完整的历史记录，有助于 git 操作，不过对于简单的 push 非必须
-          # fetch-depth: 0 
-          
+          # fetch-depth: 0
+
       - name: 检查并更新版本标签文件
         id: check-version
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bash .github/workflows/update_release_tag.sh
-        
+
   # Job 2-1: 构建稳定版 (Stable) - 仅在需要时运行
   build-stable:
     runs-on: ubuntu-latest
@@ -69,7 +68,7 @@ jobs:
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
-      
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -78,7 +77,7 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-          
+
       - name: 登录到 GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -114,7 +113,7 @@ jobs:
           name: digests-stable-${{ env.PLATFORM_PAIR }}
           path: /tmp/digests-stable/*
           retention-days: 1
-          
+
   # Job 2-2: 构建预发布版 (Pre-release) - 仅在需要时运行
   build-pre:
     runs-on: ubuntu-latest
@@ -143,7 +142,7 @@ jobs:
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
-      
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -152,7 +151,7 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-          
+
       - name: 登录到 GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -203,7 +202,7 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-          
+
       - name: 登录到 GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -217,7 +216,7 @@ jobs:
           pattern: digests-stable-*
           path: /tmp/digests
           merge-multiple: true
-      
+
       - name: 创建并推送稳定版 manifest list 到双仓库
         working-directory: /tmp/digests
         run: |
@@ -229,7 +228,7 @@ jobs:
             --tag ${{ env.GHCR_IMAGE }}:latest \
             --tag ${{ env.GHCR_IMAGE }}:${{ needs.prepare.outputs.stable_version }} \
             $(printf '${{ env.DOCKER_IMAGE }}@sha256:%s ' *)
-          
+
       - name: 检查双仓库的最终镜像
         if: always()
         run: |
@@ -252,7 +251,7 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-          
+
       - name: 登录到 GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -278,7 +277,7 @@ jobs:
             --tag ${{ env.GHCR_IMAGE }}:dev \
             --tag ${{ env.GHCR_IMAGE }}:${{ needs.prepare.outputs.pre_version }} \
             $(printf '${{ env.DOCKER_IMAGE }}@sha256:%s ' *)
-          
+
       - name: 检查双仓库的最终镜像
         if: always()
         run: |
@@ -286,4 +285,4 @@ jobs:
           docker buildx imagetools inspect ${{ env.DOCKER_IMAGE }}:dev
           echo "--- 检查 GHCR 镜像 ---"
           docker buildx imagetools inspect ${{ env.GHCR_IMAGE }}:dev
-          
+

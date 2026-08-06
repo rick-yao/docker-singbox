@@ -1,0 +1,68 @@
+name: Check sing-box Release
+
+on:
+  # GitHub Actions 的 schedule 不是上游仓库的 Release 事件，因此用轻量检查
+  # 轮询上游版本；只有检测到标签变化时才调用实际构建 workflow。
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-sing-box-release
+  cancel-in-progress: false
+
+jobs:
+  check-release:
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.check.outputs.should_build }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: 检查上游版本
+        id: check
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          auth_args=(-H "Accept: application/vnd.github+json")
+          if [ -n "${GITHUB_TOKEN}" ]; then
+            auth_args+=( -H "Authorization: Bearer ${GITHUB_TOKEN}" )
+          fi
+
+          stable_version=$(curl --fail-with-body -sS "${auth_args[@]}" \
+            "https://api.github.com/repos/SagerNet/sing-box/releases/latest" \
+            | jq -r '.tag_name // empty')
+          pre_version=$(curl --fail-with-body -sS "${auth_args[@]}" \
+            "https://api.github.com/repos/SagerNet/sing-box/releases?per_page=100" \
+            | jq -r 'if type == "array" then ([.[] | select(.prerelease == true)] | first | .tag_name // empty) else empty end')
+
+          local_stable=$(head -n1 ReleaseTag 2>/dev/null || true)
+          local_pre=$(head -n1 PreReleaseTag 2>/dev/null || true)
+
+          echo "稳定版: ${local_stable:-<empty>} -> ${stable_version:-<empty>}"
+          echo "预发布版: ${local_pre:-<empty>} -> ${pre_version:-<empty>}"
+
+          should_build=false
+          if [ -n "${stable_version}" ] && [ "${local_stable}" != "${stable_version}" ]; then
+            should_build=true
+          fi
+          if [ -n "${pre_version}" ] && [ "${local_pre}" != "${pre_version}" ]; then
+            should_build=true
+          fi
+
+          echo "should_build=${should_build}" >> "${GITHUB_OUTPUT}"
+
+  build:
+    needs: check-release
+    if: needs.check-release.outputs.should_build == 'true'
+    permissions:
+      contents: write
+      packages: write
+    uses: ./.github/workflows/Auto Build Image.yml
+    secrets: inherit
