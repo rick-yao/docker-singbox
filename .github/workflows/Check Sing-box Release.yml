@@ -28,19 +28,35 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
 
           auth_args=(-H "Accept: application/vnd.github+json")
           if [ -n "${GITHUB_TOKEN}" ]; then
             auth_args+=( -H "Authorization: Bearer ${GITHUB_TOKEN}" )
           fi
 
-          stable_version=$(curl --fail-with-body -sS "${auth_args[@]}" \
-            "https://api.github.com/repos/SagerNet/sing-box/releases/latest" \
-            | jq -r '.tag_name // empty')
-          pre_version=$(curl --fail-with-body -sS "${auth_args[@]}" \
-            "https://api.github.com/repos/SagerNet/sing-box/releases?per_page=100" \
-            | jq -r 'if type == "array" then ([.[] | select(.prerelease == true)] | first | .tag_name // empty) else empty end')
+          # GitHub API 偶发 5xx / 限流（如平台故障时），带重试拉取上游版本
+          api_get() {
+            local url="$1"
+            local attempt
+            for attempt in 1 2 3; do
+              if curl --fail-with-body -sS "${auth_args[@]}" "$url"; then
+                return 0
+              fi
+              echo "::warning::GitHub API 请求失败（第 ${attempt} 次），稍后重试: ${url}"
+              sleep 5
+            done
+            return 1
+          }
+
+          stable_version=$(api_get "https://api.github.com/repos/SagerNet/sing-box/releases/latest" | jq -r '.tag_name // empty' || true)
+          pre_version=$(api_get "https://api.github.com/repos/SagerNet/sing-box/releases?per_page=100" | jq -r 'if type == "array" then ([.[] | select(.prerelease == true)] | first | .tag_name // empty) else empty end' || true)
+
+          if [ -z "${stable_version}" ] && [ -z "${pre_version}" ]; then
+            echo "多次重试后仍无法获取上游版本，本轮跳过，等待下次定时检查"
+            echo "should_build=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
 
           local_stable=$(head -n1 ReleaseTag 2>/dev/null || true)
           local_pre=$(head -n1 PreReleaseTag 2>/dev/null || true)
